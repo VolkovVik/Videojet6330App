@@ -79,45 +79,49 @@ namespace Videojet6330App.Printer
         {
             try
             {
+                await DisableAllNotificationsCommand();
+                //var faults = await GetAllFaultsCommand();
+                //var errors = await GetAllWarningsCommand();
+                await ClearAllFaultsCommand();
+                await ClearAllWarningsCommand();
+
                 var overallState = await WaitPrinterStarting();
                 if (overallState == OverallState.Running)
                     await SetStateCommand(OverallState.Offline);
-                var state = await GetStateCommand();
-                var faults = await GetAllFaultsCommand();
-                var errors = await GetAllWarningsCommand();
 
-                //await ClearAllFaultsCommand();
-                //await ClearAllWarningsCommand();
-
-                //faults = await GetAllFaultsCommand();
-                //errors = await GetAllWarningsCommand();
-
-                //await DisableAllNotificationsCommand();
                 // Установка шаблона и настроек буфера
                 // Если не выбран шаблон печати, принтер не может перейти в статус Running
                 await SelectTemplateCommand(template);
                 var currentTemplate = await GetTemplateCommand();
-                state = await GetStateCommand();
+                if (currentTemplate != template)
+                    throw SetException("Init", "invalid set current job", currentTemplate);
+
+                var state = await GetStateCommand();
                 if (state.CurrentJob != template)
                     throw SetException("Init", "invalid set current job", state.CurrentJob);
 
                 var fields = await GetFieldsListCommand(template);
-                var data = await GetCurrentDataCommand();
 
-                await SetHeaderOnlyCommand(new[] {"Varfield00"});
-                await SetHeaderOnlyCommand(fields.ToArray());
+                //var data = await GetCurrentDataCommand();
+                //var answer1 = await SetHeaderOnlyCommand(new[] {"string"});
+                //await SetHeaderOnlyCommand(fields.ToArray());
 
                 await ClearBufferCommand();
                 var count = await GetBufferCount();
+                if ( count != 0 )
+                    throw SetException( "Init", "invalid clear buffer", count.ToString("D") );
 
-                // Command not work
-                //var max = await GetMaximumRecordsCommand();
+                // Установка размера буфера
                 await SetMaximumRecordsCommand(MaxBufferCount);
-				
+                var max = await GetMaximumRecordsCommand();
+                if ( max != MaxBufferCount )
+                    throw SetException( "Init", "invalid set maximum records", max.ToString( "D" ) );
+
                 state = await GetStateCommand();
                 if (state.OverallState == OverallState.Offline)
                     // Установка режима Running
                     await SetStateCommand(OverallState.Running);
+
                 // Ожидание 1 секунды, чтобы принтер смог установить печатающую головку в положение печати
                 await Task.Delay(TimeSpan.FromSeconds(3));
                 state = await GetStateCommand();
@@ -172,7 +176,12 @@ namespace Videojet6330App.Printer
 
         public Task SwitchOn() => Task.CompletedTask;
 
-        public async Task SwitchOff() => await SetStateCommand(OverallState.Offline);
+        public async Task SwitchOff()
+        {
+            var overallState = await WaitPrinterStarting();
+            if (overallState == OverallState.Running)
+                await SetStateCommand(OverallState.Offline);
+        }
 
         public async Task WriteNewCodes(IEnumerable<string> codes)
         {
@@ -182,34 +191,48 @@ namespace Videojet6330App.Printer
             foreach (var code in enumerable)
             {
                 Log.Information($"Write new code = {code}");
-                var dict = new Dictionary<string, string> {{ "Varfield00", code}};
-                await SetHeaderAndDataCommand(dict);    
+                var dict = new Dictionary<string, string> {{"string", code}};
+                await SetHeaderAndDataCommand(dict);
             }
 
-            try
+            var countBegin = await GetRecordCountCommand();
+
+            for (var i = 0; i < enumerable.Count; i++)
             {
-                await PrintCommand();
-				await Task.Delay(TimeSpan.FromSeconds(5));
-                await PrintCommand();
+                try
+                {
+                    Log.Information($"Index - {i}");
+                    await PrintCommand();
+                    // Тестовые данные
+                    var count = await GetRecordCountCommand();
+                    Log.Information($"Buffer count {count}");
+                    var freeSpace = await GetFreeSpaceCommand();
+                    Log.Information($"Free space {freeSpace}");
+                    var nextIndex = await GetNextRecordIndexCommand();
+                    Log.Information($"Next record index {nextIndex}");
+                    var lastIndex = await GetLastRecordIndexCommand();
+                    Log.Information($"Last record index {lastIndex}");
+
+                    await Task.Delay(2000);
+                }
+                catch (Exception exc)
+                {
+                    Log.Information($"Exception - {exc.Message}");
+                }
             }
-            catch (Exception) { };
 
-            // Тестовые данные
-            var count = await GetRecordCountCommand();
-            Log.Information($"Buffer count {count}");
-            var freeSpace = await GetFreeSpaceCommand();
-            Log.Information($"Free space {freeSpace}");
-            var nextIndex = await GetNextRecordIndexCommand();
-            Log.Information($"Next record index {nextIndex}");
-            var lastIndex = await GetLastRecordIndexCommand();
-            Log.Information($"Last record index {lastIndex}");
-
-            await ClearBuffer();
-
-            count = await GetRecordCountCommand();
+            var count_end = await GetRecordCountCommand();
             var state = await GetStateCommand();
             var faults = await GetAllFaultsCommand();
             var errors = await GetAllWarningsCommand();
+
+            await ClearAllFaultsCommand();
+            await ClearAllWarningsCommand();
+
+            faults = await GetAllFaultsCommand();
+            errors = await GetAllWarningsCommand();
+
+            await ClearBuffer();
         }
 
         #region Команды для работы с термотрансферным принтером Videojet Dataflex 6330
@@ -224,6 +247,20 @@ namespace Videojet6330App.Printer
             public string CurrentJob {get; set;}
             public int BatchCount {get; set;}
             public int TotalCount {get; set;}
+        }
+
+        private class FaultState
+        {
+            public string Number {get; set;}
+            public string Title {get; set;}
+            public FaultClear IsClear {get; set;}
+            public override string ToString() => $"{Number} {GetDescription(IsClear)} {Title}";
+        }
+
+        private enum FaultClear
+        {
+            [Description("Неочищаемая")] NotClear = 0,
+            [Description("Очищаемая")] Clear = 1
         }
 
         private enum OverallState
@@ -528,19 +565,20 @@ namespace Videojet6330App.Printer
         /// On success, returns the total count of the number of faults followed by a list of current faults.
         /// On failure, returns the default failure response.
         /// </returns>
-        private async Task<IEnumerable<string>> GetAllFaultsCommand()
+        private async Task<IEnumerable<FaultState>> GetAllFaultsCommand()
         {
             var response = await ExecuteRequestList("GFT\r", @"^FLT\|\d+\|.*\r$", 3);
 
-            var result = new List<string>();
+            var result = new List<FaultState>();
             var array = response.ToList();
-
             for (var i = 0; i < array.Count; i += 3)
             {
-                var str = array[i] + " " +
-                          (array[i + 1] == "0" ? "Not Cleanable" : "Cleanable") + " " +
-                          array[i + 2];
-                result.Add(str);
+                result.Add(new FaultState
+                {
+                    Number = array[i],
+                    IsClear = array[i + 1] == "0" ? FaultClear.NotClear : FaultClear.Clear,
+                    Title = array[i + 2]
+                });
             }
             return result;
         }
@@ -552,18 +590,18 @@ namespace Videojet6330App.Printer
         /// On  success,  returns  the  total  count  of  the  number  of  warnings  followed  by  a  list  of  current warnings.
         /// On failure, returns the default failure response.
         /// </returns>
-        private async Task<IEnumerable<string>> GetAllWarningsCommand()
+        private async Task<IEnumerable<FaultState>> GetAllWarningsCommand()
         {
             var response = await ExecuteRequestList("GWN\r", @"^WRN\|\d+\|.*\r$", 3);
 
-            var result = new List<string>();
+            var result = new List<FaultState>();
             var array = response.ToList();
-            for (var i = 0; i < array.Count; i += 3)
-            {
-                var str = array[i] + " " +
-                          (array[i + 1] == "0" ? "Not Cleanable" : "Cleanable") + " " +
-                          array[i + 2];
-                result.Add(str);
+            for ( var i = 0 ; i < array.Count ; i += 3 ) {
+                result.Add( new FaultState {
+                    Number = array [ i ],
+                    IsClear = array [ i + 1 ] == "0" ? FaultClear.NotClear : FaultClear.Clear,
+                    Title = array [ i + 2 ]
+                } );
             }
             return result;
         }
@@ -577,7 +615,7 @@ namespace Videojet6330App.Printer
         /// If the command succeeds, the response is sent after all faults have been cleared.
         /// </returns>
         /// ReSharper disable once UnusedMethodReturnValue.Local
-        private async Task<string> ClearAllFaultsCommand() => await ExecuteRequest("CAF\r");
+        private async Task<string> ClearAllFaultsCommand() => await _socket.Request("\rCAF\r", 20);
 
         /// <summary>
         /// This command attempts to clear all warning conditions present in the printer. 
@@ -588,8 +626,8 @@ namespace Videojet6330App.Printer
         /// If the command succeeds, the response is sent after all warnings have been cleared.
         /// </returns>
         /// ReSharper disable once UnusedMethodReturnValue.Local
-        private async Task<string> ClearAllWarningsCommand() => await ExecuteRequest("CAW\r");
-
+        private async Task<string> ClearAllWarningsCommand() => await _socket.Request( "\rCAW\r", 20 );
+        
         /// <summary>
         /// This commands sends a single record with both field names and data.
         /// </summary>
@@ -730,7 +768,7 @@ namespace Videojet6330App.Printer
         /// On success, returns SGM|<r/>|<CR/>, where <r/> is the maximum number of records allowed in the serialization buffer.
         /// On failure, returns the default failure response
         /// </returns>
-        private async Task<int> GetMaximumRecordsCommand() => await ExecuteRequestInt("SMG\r");
+        private async Task<int> GetMaximumRecordsCommand() => await ExecuteRequestInt("SGM\r");
 
         /// <summary>
         /// This command switches off all Async comms messages and prevents the sending of all notifications. Equivalent to SAN|0|

@@ -31,7 +31,7 @@ namespace VideoJet6330App
             var templates = await printer.GetTemplates();
             Console.WriteLine($"Templates {string.Join(", ", templates)}");
 
-            await printer.Init("!_6320test");
+            await printer.Init("DM-24x24-1str");
             await printer.ClearBuffer();
             var count = await printer.GetBufferCount();
             Console.WriteLine($"Buffer count {count}");
@@ -42,13 +42,12 @@ namespace VideoJet6330App
                 if (str.Key == ConsoleKey.Escape)
                     break;
 
-                await printer.WriteNewCodes(RandomListString(10));
+                await printer.WriteNewCodes(RandomListString(150));
                 count = await printer.GetBufferCount();
                 Console.WriteLine($"Buffer count {count}");
             }
 
-            Console.Read();
-
+            await printer.SwitchOff();
             printer.Disconnect();
             Log.Information("Done!");
             Log.CloseAndFlush();
