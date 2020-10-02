@@ -42,7 +42,7 @@ namespace Videojet6330App.Socket
             }
             catch (OperationCanceledException)
             {
-               _logger.Error($"{_description} connect timeout");
+                _logger.Error($"{_description} connect timeout");
                 return false;
             }
         }
@@ -78,6 +78,24 @@ namespace Videojet6330App.Socket
             catch (OperationCanceledException)
             {
                 _logger.Error($"{_description} send data timeout");
+                return false;
+            }
+        }
+
+        public async Task<bool> Send(byte[] data, int timeout, Encoding encoding)
+        {
+            _encoding = encoding;
+            var cts = new CancellationTokenSource(timeout);
+            try
+            {
+                if (!SendAsync(data))
+                    throw new InvalidOperationException($"{_description} could not send byte array");
+                await _sendEvent.WaitAsync(cts.Token);
+                return !cts.IsCancellationRequested;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.Error($"{_description} send byte array timeout");
                 return false;
             }
         }

@@ -49,7 +49,7 @@ namespace Videojet6330App.Socket
 
         public async Task<string> Request(string payload)
         {
-            _logger?.Debug($"{_description} send {payload.Replace("\r","<CR>").TrimEnd('\r', '\n')}");
+            _logger?.Debug($"{_description} send {payload.Replace("\r", "<CR>").TrimEnd('\r', '\n')}");
 
             CheckConnect();
             var result = await _client.Request(payload, 20000);
@@ -58,7 +58,7 @@ namespace Videojet6330App.Socket
                 : $"{_description} receive {result.TrimEnd('\r', '\n')}");
             return !string.IsNullOrWhiteSpace(result)
                 ? result
-                : throw new InvalidOperationException( $"{_description} not receive data");
+                : throw new InvalidOperationException($"{_description} not receive data");
         }
 
         public async Task<string> Request(byte[] payload, Encoding encoding)
@@ -73,7 +73,7 @@ namespace Videojet6330App.Socket
                 : $"{_description} receive {result.TrimEnd('\r', '\n')}");
             return !string.IsNullOrWhiteSpace(result)
                 ? result
-                : throw new InvalidOperationException( $"{_description} not receive data byte");
+                : throw new InvalidOperationException($"{_description} not receive data byte");
         }
 
         public async Task Send(string payload)
@@ -82,6 +82,15 @@ namespace Videojet6330App.Socket
 
             CheckConnect();
             await _client.Send(payload, 20000);
+        }
+
+        public async Task Send(byte[] payload, Encoding encoding)
+        {
+            _logger?.Debug(
+                $"{_description} send {encoding.GetString(payload).Replace("\r", "<CR>").TrimEnd('\r', '\n')}");
+
+            CheckConnect();
+            await _client.Send(payload, 20000, encoding);
         }
 
         private void CheckConnect()
