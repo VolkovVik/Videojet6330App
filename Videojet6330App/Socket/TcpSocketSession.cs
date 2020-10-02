@@ -13,6 +13,7 @@ namespace Videojet6330App.Socket
     {
         private bool _stop;
         private string _result;
+        private Encoding _encoding;
 
         private readonly int _port;
         private readonly string _host;
@@ -23,6 +24,7 @@ namespace Videojet6330App.Socket
             _host = host;
             _port = port;
             _logger = logger;
+            _encoding = Encoding.UTF8;
         }
 
         private readonly AsyncAutoResetEvent _connectEvent = new AsyncAutoResetEvent(false);
@@ -100,6 +102,24 @@ namespace Videojet6330App.Socket
             }
         }
 
+        public async Task<string> Request(byte[] data, int timeout, Encoding encoding)
+        {
+            _encoding = encoding;
+            var cts = new CancellationTokenSource(timeout);
+            try
+            {
+                if (!SendAsync(data))
+                    throw new InvalidOperationException("TCP client could not request execute byte array");
+                await _receivedEvent.WaitAsync(cts.Token);
+                return !cts.IsCancellationRequested ? _result : null;
+            }
+            catch (OperationCanceledException)
+            {
+                _logger.Error("[Socket] TCP client request byte array timeout");
+                return null;
+            }
+        }
+
         protected override void OnConnected()
         {
             _stop = false;
@@ -128,7 +148,7 @@ namespace Videojet6330App.Socket
 
         protected override void OnReceived(byte[] buffer, long offset, long size)
         {
-            _result = Encoding.UTF8.GetString(buffer, (int) offset, (int) size);
+            _result = _encoding.GetString(buffer, (int) offset, (int) size);
             _receivedEvent.Set();
             _logger?.Debug($"[Socket] TCP client {_host}:{_port} receive {size} byte");
         }

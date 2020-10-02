@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Polly;
@@ -79,6 +80,25 @@ namespace Videojet6330App.Socket
                                         _ => TimeSpan.FromSeconds(ReconnectIntervalSec),
                                         (exc, _) => OnRetry(exc));
                 return await policy.ExecuteAsync(token => _client.Request(payload),
+                    cancellationToken);
+            }
+            finally
+            {
+                _waitHandler.Set();
+            }
+        }
+
+        public async Task<string> Request(byte[] payload, int retryCount, Encoding encoding, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                _waitHandler.WaitOne();
+                _countRetry = 0;
+                var policy = Policy.Handle<Exception>()
+                                   .WaitAndRetryAsync(retryCount,
+                                        _ => TimeSpan.FromSeconds(ReconnectIntervalSec),
+                                        (exc, _) => OnRetry(exc));
+                return await policy.ExecuteAsync(token => _client.Request(payload, encoding),
                     cancellationToken);
             }
             finally

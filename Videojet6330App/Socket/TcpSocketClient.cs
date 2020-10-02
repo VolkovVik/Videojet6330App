@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Text;
 using System.Threading.Tasks;
 using Serilog.Core;
 
@@ -57,7 +58,22 @@ namespace Videojet6330App.Socket
                 : $"{_description} receive {result.TrimEnd('\r', '\n')}");
             return !string.IsNullOrWhiteSpace(result)
                 ? result
-                : throw new InvalidOperationException($"TCP client {_host}:{_port} not receive data");
+                : throw new InvalidOperationException( $"{_description} not receive data");
+        }
+
+        public async Task<string> Request(byte[] payload, Encoding encoding)
+        {
+            _logger?.Debug(
+                $"{_description} send {encoding.GetString(payload).Replace("\r", "<CR>").TrimEnd('\r', '\n')}");
+
+            CheckConnect();
+            var result = await _client.Request(payload, 20000, encoding);
+            _logger?.Debug(string.IsNullOrWhiteSpace(result)
+                ? $"{_description} not receive data byte"
+                : $"{_description} receive {result.TrimEnd('\r', '\n')}");
+            return !string.IsNullOrWhiteSpace(result)
+                ? result
+                : throw new InvalidOperationException( $"{_description} not receive data byte");
         }
 
         public async Task Send(string payload)
@@ -73,7 +89,7 @@ namespace Videojet6330App.Socket
             if (_client.IsConnected) return;
 
             _logger?.Error($"{_description} not connected");
-            throw new InvalidOperationException($"TCP client {_host}:{_port} not connected");
+            throw new InvalidOperationException($"{_description} not connected");
         }
     }
 }
