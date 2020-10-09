@@ -112,10 +112,9 @@ namespace Videojet6330App.Printer
                     throw SetException( "Init", "invalid clear buffer", count.ToString("D") );
 
                 // Установка размера буфера
-                await SetMaximumRecordsCommand(MaxBufferCount);
-                var max = await GetMaximumRecordsCommand();
-                if ( max != MaxBufferCount )
-                    throw SetException( "Init", "invalid set maximum records", max.ToString( "D" ) );
+                await SetMaximumRecordsCommand(1000);
+                var length = await GetMaximumRecordsCommand();
+                Log.Information($"[Printer {PrinterName}] buffer length = {length}");
 
                 state = await GetStateCommand();
                 if (state.OverallState == OverallState.Offline)
